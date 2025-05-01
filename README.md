@@ -6,7 +6,7 @@
 2. [Technology Stack](#technology-stack)
 3. [Project Structure](#project-structure)
 4. [Setup and Installation](#setup-and-installation)
-5. [API Documentation](#api-documentation)
+5. [API Endpoints](#api-endpoints)
 
 ## Project Overview
 Backend for a Web-based Video Editing Platform 
@@ -59,4 +59,53 @@ Video Editing Platform backend API server built with Node.js and Express
      ```
 
 
+## API Endpoints
 
+### 1. Video Upload Endpoint
+
+* **Endpoint:** `POST /api/videos/upload`
+* **Accepts:** 
+```
+{
+  file: <your-video-file>
+}
+```
+* **Stores:** Metadata in the DB (video name, duration, etc.)
+
+
+### 2. Video Trimming / Cutting
+
+* **Endpoint:** `POST /api/videos/:id/trim`
+* **Accepts:** 
+```
+{
+  "start": "hh:mm:ss",
+  "end": "hh:mm:ss",
+}
+```
+* **Uses:** FFmpeg to create a trimmed version
+* **Action:** Save trimmed video path and update DB
+
+### 3. Add Subtitles
+
+* **Endpoint:** `POST /api/videos/:id/subtitles`
+* **Accepts:** 
+```
+{
+  "startTime": "hh:mm:ss",
+  "endTime": "hh:mm:ss",
+  "text": "Subtitle check!"
+}
+```
+* **Action:** Overlay on video using FFmpeg
+
+### 4. Render Final Video
+
+* **Endpoint:** `POST /api/videos/:id/render`
+* **Combines:** All changes into one final video
+* **Action:** Saves it and updates status in DB
+
+### 5. Download Final Video
+
+* **Endpoint:** `GET /api/videos/:id/download`
+* **Returns:** Final rendered video for download
