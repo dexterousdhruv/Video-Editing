@@ -6,7 +6,7 @@ import path from "path";
 import ffmpeg from "../utils/ffmpegConfig";
 import { convertToDuration, escapeFilePath } from "../utils/helpers";
 import { config } from "dotenv";
-config()
+config();
 
 export const getVideoInfo = async (
   req: Request,
@@ -21,14 +21,7 @@ export const getVideoInfo = async (
     const video = await prismaDb.video.findUnique({ where: { id } });
     if (!video) return next(errorHandler(404, "Video not found"));
 
-    ffmpeg.ffprobe(path.resolve(video.path), async (err, metadata) => {
-      if (err) {
-        return next(errorHandler(500, "Error reading video metadata"));
-      }
-
-      res.status(200)
-        .json({ message: "Uploaded successfully", video: { video, metadata } });
-    });
+    res.status(200).json({ message: "Uploaded successfully", video });
   } catch (err) {
     console.error(err);
     return next(errorHandler(500, "Server error, Please try again later!"));
@@ -46,7 +39,7 @@ export const uploadVideo = async (
     }
 
     const videoName = req.file.originalname;
-    const videoPath = "./uploads/" + videoName
+    const videoPath = "./uploads/" + videoName;
     const videoSize = req.file.size;
 
     if (!fs.existsSync(videoPath)) {
@@ -131,7 +124,6 @@ export const trimVideo = async (
   }
 };
 
-
 export const addSubtitles = async (
   req: Request,
   res: Response,
@@ -154,7 +146,7 @@ export const addSubtitles = async (
     const outputFileName = `subtitled-${Date.now()}-${video.name}`;
     const outputDir = path.resolve("uploads/subtitled");
     const outputPath = path.join("./uploads/subtitled", outputFileName);
-    const ffmpegOutputPath = escapeFilePath(outputPath)
+    const ffmpegOutputPath = escapeFilePath(outputPath);
 
     // Ensure directory exists
     if (!fs.existsSync(outputDir)) {
@@ -176,12 +168,12 @@ export const addSubtitles = async (
       .videoCodec("libx264")
       .audioCodec("libmp3lame")
       .outputOptions(`-vf "subtitles='${ffmpegSubtitlePath}'"`)
-      .output((ffmpegOutputPath))
+      .output(ffmpegOutputPath)
       .on("start", (cmdLine) => {
         console.log("Spawned FFmpeg with command:", cmdLine);
       })
       .on("end", async () => {
-        fs.unlinkSync(subtitleFilePath); 
+        fs.unlinkSync(subtitleFilePath);
         await prismaDb.video.update({
           where: { id },
           data: { subtitledPath: outputPath },
@@ -216,7 +208,9 @@ export const renderFinalVideo = async (
       return next(errorHandler(404, "Video not found"));
     }
 
-    const inputPath = path.resolve(video.subtitledPath || video.trimmedPath || video.path);
+    const inputPath = path.resolve(
+      video.subtitledPath || video.trimmedPath || video.path
+    );
     if (!fs.existsSync(inputPath)) {
       return next(errorHandler(404, "Input video file does not exist"));
     }
@@ -226,7 +220,6 @@ export const renderFinalVideo = async (
       fs.mkdirSync(outputDir, { recursive: true });
     }
 
-    
     const outputFileName = `final-${Date.now()}-${video.name}`;
     const outputPath = path.join("./uploads/final", outputFileName);
 
@@ -260,8 +253,6 @@ export const renderFinalVideo = async (
   }
 };
 
-
-
 export const downloadFinalVideo = async (
   req: Request,
   res: Response,
@@ -276,19 +267,18 @@ export const downloadFinalVideo = async (
       return next(errorHandler(404, "Final rendered video not found"));
     }
 
-    const finalPath = video.finalPath
-  
+    const finalPath = video.finalPath;
 
     if (!fs.existsSync(finalPath)) {
       return next(errorHandler(404, "Rendered file does not exist on server"));
     }
 
-    res.status(200).json({ 
+    res.status(200).json({
       message: "success",
-      downloadUrl: `${process.env.BASE_URL}/uploads/final/${path.basename(finalPath)}`, 
+      downloadUrl: `${process.env.BASE_URL}/uploads/final/${path.basename(
+        finalPath
+      )}`,
     });
-
-  
   } catch (err) {
     console.error("Error in downloadFinalVideo:", err);
     return next(errorHandler(500, "Server error. Please try again later."));
