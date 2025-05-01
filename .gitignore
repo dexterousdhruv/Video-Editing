@@ -1,0 +1,12 @@
+node_modules
+# Keep environment variables out of version control
+# Ignore real env files
+.env
+.env.*
+
+dist
+
+# But do NOT ignore example env
+!.env.example
+
+src
