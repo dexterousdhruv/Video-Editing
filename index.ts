@@ -13,9 +13,11 @@ app.use(cors({
   origin: process.env.CLIENT_URL || "*",
 }))
 app.use(morgan('dev'));
+app.use('/uploads', express.static('./uploads/final'))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }));
-  
+
+ 
 app.use('/api/videos', videoRouter);
 
 app.use(errorResponse)

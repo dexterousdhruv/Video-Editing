@@ -4,7 +4,11 @@ import { errorHandler } from "../utils/error";
 import fs from "fs";
 import path from "path";
 import ffmpeg from "../utils/ffmpegConfig";
-import { convertToDuration, escapeFilePath } from "../utils/helpers";
+import {
+  addSubtitlesToVideo,
+  convertToDuration,
+  generateTimedSrtFile,
+} from "../utils/helpers";
 import { config } from "dotenv";
 config();
 
@@ -21,7 +25,7 @@ export const getVideoInfo = async (
     const video = await prismaDb.video.findUnique({ where: { id } });
     if (!video) return next(errorHandler(404, "Video not found"));
 
-    res.status(200).json({ message: "Uploaded successfully", video });
+    res.status(200).json({ message: "success", video });
   } catch (err) {
     console.error(err);
     return next(errorHandler(500, "Server error, Please try again later!"));
@@ -39,7 +43,7 @@ export const uploadVideo = async (
     }
 
     const videoName = req.file.originalname;
-    const videoPath = "./uploads/" + videoName;
+    const videoPath = req.file.path;
     const videoSize = req.file.size;
 
     if (!fs.existsSync(videoPath)) {
@@ -91,7 +95,7 @@ export const trimVideo = async (
 
     const trimmedFileName = `trimmed-${Date.now()}-${video.name}`;
     const outputDir = path.resolve("uploads/trimmed");
-    const outputPath = path.join("./uploads/trimmed", trimmedFileName);
+    const outputPath = path.join(outputDir, trimmedFileName);
 
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
@@ -118,8 +122,8 @@ export const trimVideo = async (
         return next(errorHandler(500, "Server error, Please try again later!"));
       })
       .run();
-  } catch (err) {
-    console.error(err);
+  } catch (e) {
+    console.error("Error in trim video controller:", e);
     return next(errorHandler(500, "Server error"));
   }
 };
@@ -145,8 +149,7 @@ export const addSubtitles = async (
     const inputPath = video.trimmedPath || video.path;
     const outputFileName = `subtitled-${Date.now()}-${video.name}`;
     const outputDir = path.resolve("uploads/subtitled");
-    const outputPath = path.join("./uploads/subtitled", outputFileName);
-    const ffmpegOutputPath = escapeFilePath(outputPath);
+    const outputPath = path.join(outputDir, outputFileName);
 
     // Ensure directory exists
     if (!fs.existsSync(outputDir)) {
@@ -155,43 +158,23 @@ export const addSubtitles = async (
 
     // Generate .srt subtitle file
     const subtitleFilePath = path.resolve(`temp-${id}.srt`);
-    const ffmpegSubtitlePath = escapeFilePath(subtitleFilePath);
-    const subtitleContent = `
-      1
-     00:00:${startTime},000 --> 00:00:${endTime},000
-     ${text}
-    `;
+    generateTimedSrtFile(text, startTime, endTime, subtitleFilePath);
 
-    fs.writeFileSync(subtitleFilePath, subtitleContent);
+    await addSubtitlesToVideo(inputPath, subtitleFilePath, outputPath);
+    fs.unlinkSync(subtitleFilePath);
 
-    ffmpeg(inputPath)
-      .videoCodec("libx264")
-      .audioCodec("libmp3lame")
-      .outputOptions(`-vf "subtitles='${ffmpegSubtitlePath}'"`)
-      .output(ffmpegOutputPath)
-      .on("start", (cmdLine) => {
-        console.log("Spawned FFmpeg with command:", cmdLine);
-      })
-      .on("end", async () => {
-        fs.unlinkSync(subtitleFilePath);
-        await prismaDb.video.update({
-          where: { id },
-          data: { subtitledPath: outputPath },
-        });
-        return res.status(200).json({
-          message: "Subtitles added",
-          subtitledPath: outputPath,
-        });
-      })
-      .on("error", (err) => {
-        console.log(err);
-        fs.unlinkSync(subtitleFilePath);
-        return next(errorHandler(500, "Error overlaying subtitles"));
-      })
-      .run();
-  } catch (err) {
-    console.log(err);
-    return next(errorHandler(500, "Something went wrong"));
+    await prismaDb.video.update({
+      where: { id },
+      data: { subtitledPath: outputPath },
+    });
+
+    res.status(200).json({
+      message: "Subtitles added",
+      subtitledPath: outputPath,
+    });
+  } catch (e) {
+    console.log("Error in add subtitles controller:", e);
+    return next(errorHandler(500, "Server error, Please try again later!"));
   }
 };
 
@@ -221,19 +204,42 @@ export const renderFinalVideo = async (
     }
 
     const outputFileName = `final-${Date.now()}-${video.name}`;
-    const outputPath = path.join("./uploads/final", outputFileName);
+    const outputPath = path.join(outputDir, outputFileName);
 
     ffmpeg(inputPath)
       .output(outputPath)
+      .outputOptions(["-c:v copy", "-c:a copy", "-c:s mov_text"])
+
       .on("start", (cmdLine) => {
         console.log("FFmpeg started with command:", cmdLine);
       })
       .on("end", async () => {
+
+        const filesToDelete = [video.subtitledPath, video.trimmedPath].filter(
+          Boolean
+        );
+        for (const file of filesToDelete) {
+          const resolvedPath = path.resolve(file!);
+          if (fs.existsSync(resolvedPath)) {
+            try {
+              fs.unlinkSync(resolvedPath);
+              console.log(`Deleted intermediate file: ${resolvedPath}`);
+            } catch (err) {
+              console.warn(
+                `Failed to delete intermediate file: ${resolvedPath}`,
+                err
+              );
+            }
+          }
+        }
+
         const updatedVideo = await prismaDb.video.update({
           where: { id },
           data: {
             finalPath: outputPath,
             status: "rendered",
+            trimmedPath: null,
+            subtitledPath: null,
           },
         });
 
@@ -248,7 +254,7 @@ export const renderFinalVideo = async (
       })
       .run();
   } catch (e) {
-    console.error("Error in renderFinalVideo controller:", e);
+    console.error("Error in render final video controller:", e);
     return next(errorHandler(500, "Server error, Please try again later!"));
   }
 };
@@ -263,8 +269,12 @@ export const downloadFinalVideo = async (
 
     const video = await prismaDb.video.findUnique({ where: { id } });
 
-    if (!video || !video.finalPath) {
-      return next(errorHandler(404, "Final rendered video not found"));
+    if (!video) {
+      return next(errorHandler(404, "File not found!"));
+    }
+
+    if (!video.finalPath) {
+      return next(errorHandler(404, "Video still not rendered!"));
     }
 
     const finalPath = video.finalPath;
@@ -275,12 +285,12 @@ export const downloadFinalVideo = async (
 
     res.status(200).json({
       message: "success",
-      downloadUrl: `${process.env.BASE_URL}/uploads/final/${path.basename(
+      downloadUrl: `${process.env.BASE_URL}/uploads/${path.basename(
         finalPath
       )}`,
     });
   } catch (err) {
-    console.error("Error in downloadFinalVideo:", err);
+    console.error("Error in download final video:", err);
     return next(errorHandler(500, "Server error. Please try again later."));
   }
 };

@@ -1,3 +1,6 @@
+import { spawn } from "child_process";
+import fs from "fs";
+
 // Helper to calculate duration
 export function convertToDuration(start: string, end: string): number {
   const startSec = parseTime(start);
@@ -18,17 +21,7 @@ export function parseTime(timeStr: string): number {
 }
 
 
-export function escapeFilePath(filepath: string): string {
-  // Replace all backslashes with double backslashes
-  filepath = filepath.replace(/\\/g, "\\\\");
-
-  // Replace all colons with backslash followed by a colon
-  filepath = filepath.replace(/:/g, "\\:");
-
-  return filepath;
-}
-
-export const formatTime = (time: string): string | null => {
+export const formatTime = (time: string ): string | null => {
   if (!time.includes(":")) {
     return `00:00:${(+time).toFixed(3).replace(".", ",").padStart(6, "0")}`;
   }
@@ -63,3 +56,72 @@ export const formatTime = (time: string): string | null => {
   }
   return null;
 };
+
+
+export const addSubtitlesToVideo = (inputVideoPath: string, subtitlePath: string, outputPath: string) => {
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn('ffmpeg', [
+      '-i', inputVideoPath,
+      '-i', subtitlePath,
+      '-c', 'copy',
+      '-c:s', 'mov_text',
+      outputPath,
+    ]);
+    ffmpeg.stdout.on('data', (data: any) => {
+      console.log(`stdout: ${data}`);
+    });
+
+    ffmpeg.stderr.on('data', (data: any) => {
+      console.error(`stderr: ${data}`);
+    });
+
+    ffmpeg.on('close', (code: any) => {
+      if (code === 0) {
+        console.log('Subtitles added successfully.');
+        resolve(outputPath);
+      } else {
+        reject(new Error(`FFmpeg process exited with code ${code}`));
+      }
+    });
+  });
+};
+
+
+export const generateTimedSrtFile = (
+  paragraph: string,
+  startTime: string,
+  endTime: string,
+  filePath: string
+) => {
+  const sentences = paragraph
+    .split(/[.?!]\s+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  
+  const start = parseTime(startTime) 
+  const end = parseTime(endTime) 
+  const totalDuration = convertToDuration(startTime, endTime) 
+
+
+  if (sentences.length === 0 || totalDuration <= 0) {
+    throw new Error("Invalid input.");
+  }
+
+  const interval = Math.floor(totalDuration / sentences.length);
+
+  const srtLines = sentences.map((sentence, index) => {
+    const subStart = start + index * interval;
+    const subEnd = index === sentences.length - 1 ? end : subStart + interval;
+    return `${index + 1}
+${formatTime(subStart.toString())} --> ${formatTime(subEnd.toString())}
+${sentence}
+`;
+  });
+
+  fs.writeFileSync(filePath, srtLines.join("\n"), "utf-8");
+    console.log(`SRT file written at ${filePath}`);
+};
+
+
+

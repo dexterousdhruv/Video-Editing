@@ -34,7 +34,6 @@ model Video {
 
   // Optional paths
   trimmedPath  String? 
-  renderedPath String? 
   subtitledPath  String?
   finalPath      String?
 }
